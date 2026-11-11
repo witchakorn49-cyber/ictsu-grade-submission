@@ -129,7 +129,10 @@ td.d{white-space:nowrap}
 .recent .rhead .sub{font-size:13px}
 .rlist{list-style:none;margin:4px 0 0;padding:0}
 .rlist li{border-top:1px solid var(--line)}
-.ritem{width:100%;background:none;border:0;text-align:left;cursor:pointer;display:grid;grid-template-columns:28px 112px 104px 1fr auto;gap:12px;align-items:center;padding:8px 4px}
+.ritem{width:100%;background:none;border:0;text-align:left;cursor:pointer;display:grid;grid-template-columns:118px 1fr auto;gap:12px;align-items:center;padding:8px 4px}
+.rday{margin-top:8px}
+.rday h3{font-size:14.5px;padding:4px 0;color:var(--ink)}
+.rday h3 .sub{font-weight:400;margin-left:6px}
 .ritem:hover{background:var(--accent-soft)}
 .rank{font-weight:700;color:var(--muted);text-align:right}
 .rdate{font-size:13px;font-weight:600;background:var(--accent-soft);color:var(--accent);border-radius:6px;padding:1px 8px;justify-self:start;white-space:nowrap}
@@ -142,7 +145,7 @@ td.d{white-space:nowrap}
   details.course summary{grid-template-columns:1fr auto;gap:2px 10px}
   .ccode{grid-column:1} .cname{grid-column:1/-1;grid-row:2} .csec{grid-column:1;grid-row:3} .pill{grid-column:2;grid-row:1;justify-self:end}
   .secs{padding-left:4px}
-  .ritem{grid-template-columns:24px 1fr auto;gap:2px 10px} .ritem .rdate{grid-column:2;grid-row:1} .ritem .ccode{grid-column:2;grid-row:2} .ritem .cname{grid-column:2/-1;grid-row:3} .ritem .pill{grid-column:3;grid-row:1}
+  .ritem{grid-template-columns:1fr auto;gap:2px 10px} .ritem .ccode{grid-column:1;grid-row:1} .ritem .cname{grid-column:1/-1;grid-row:2} .ritem .pill{grid-column:2;grid-row:1}
   #q{max-width:none}
   #asof-in,#m-course,#m-note{width:100%}
   .site-head .in{padding:16px;gap:12px;align-items:flex-start} .site-head .badge{width:42px;height:42px} .site-head .badge svg{width:24px;height:24px} h1{font-size:21px}
@@ -431,8 +434,19 @@ var Core = (function(){
     const tot = { done: 0, partial: 0, entered: 0, pending: 0, na: 0, secReq: 0, secDone: 0 };
     pl.forEach(function(p){ p.total = p.done + p.partial + p.entered + p.pending; for (const k in tot) tot[k] += p[k]; });
     tot.total = tot.done + tot.partial + tot.entered + tot.pending;
-    const recent = list.filter(function(c){ return c.last.k; }).sort(function(a, b){ return b.last.k - a.last.k || a.code.localeCompare(b.code); });
-    return { courses: list, progs: pl, tot: tot, recent: recent };
+    const dm = new Map();
+    list.forEach(function(c){
+      const per = new Map();
+      c.secs.forEach(function(s){
+        const ds = (s.dates ? s.dates.split(/,\s*/) : []).concat(s.manual && s.manual.date ? [s.manual.date] : []);
+        ds.forEach(function(d){ const k = dateKey(d); if (!k) return; if (!per.has(k)) per.set(k, []); if (per.get(k).indexOf(s.grp) < 0) per.get(k).push(s.grp); });
+      });
+      per.forEach(function(grps, k){ if (!dm.has(k)) dm.set(k, []); dm.get(k).push({ c: c, grps: grps }); });
+    });
+    const days = Array.from(dm.keys()).sort(function(a, b){ return b - a; }).map(function(k){
+      return { k: k, items: dm.get(k).sort(function(a, b){ return a.c.code.localeCompare(b.c.code); }) };
+    });
+    return { courses: list, progs: pl, tot: tot, days: days };
   }
   return { dateKey: dateKey, readXlsx: readXlsx, kind: kind, parseClasslist: parseClasslist, parseGrades: parseGrades, parseApproval: parseApproval, combine: combine, build: build, secStatus: secStatus };
 })();
@@ -444,7 +458,7 @@ if (typeof module !== 'undefined') module.exports = Core;
   const SRC = document.documentElement.outerHTML;   /* เก็บต้นฉบับหน้าไว้ใช้ตอนส่งออก */
   const $ = function(id){ return document.getElementById(id); };
   const esc = function(s){ return String(s).replace(/[&<>"]/g, function(c){ return { '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;' }[c]; }); };
-  let DATA = null, VIEW = null, prog = 'all', filt = 'all', recentN = 3;
+  let DATA = null, VIEW = null, prog = 'all', filt = 'all', rOpen = false, rDepth = 0, rAll = false;
   try { DATA = JSON.parse($('data').textContent); } catch (e) { DATA = null; }
   if (DATA && !DATA.manual) DATA.manual = [];
   const pending = { cl: null, gr: null, ap: null, stamps: {} };
@@ -457,6 +471,7 @@ if (typeof module !== 'undefined') module.exports = Core;
     na: '<svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M3 6h6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>'
   };
   const LABEL = { done: 'ส่งครบแล้ว', partial: 'ส่งบางส่วน', entered: 'กรอกแล้ว ยังไม่ส่ง', pending: 'ยังไม่ส่ง', na: 'ไม่ต้องส่ง' };
+  const p2 = function(n){ return String(n).padStart(2, '0'); };
   const pill = function(st, text){ return '<span class="pill ' + st + '">' + ICON[st] + esc(text || LABEL[st]) + '</span>'; };
   function bar(o){
     const t = o.total || 1, seg = function(cls, n, lab){ return n ? '<i class="' + cls + '" style="flex:' + n + ' 0 0" title="' + lab + ' ' + n + ' รายวิชา"></i>' : ''; };
@@ -505,24 +520,45 @@ if (typeof module !== 'undefined') module.exports = Core;
       (DATA.classlistAt ? ' · รายวิชาที่เปิดอ้างอิง classlist ณ ' + DATA.classlistAt : '');
   }
 
+  const fmtKey = function(k){ return p2(k % 100) + '/' + p2(Math.floor(k / 100) % 100) + '/' + Math.floor(k / 10000); };
+  function todayKey(){ const d = new Date(); return (d.getFullYear() + 543) * 10000 + (d.getMonth() + 1) * 100 + d.getDate(); }
+  function dayBlock(day, label){
+    return '<div class="rday"><h3>' + esc(label) + ' <span class="sub num">' + day.items.length + ' วิชา</span></h3><ul class="rlist">' + day.items.map(function(it){
+      const c = it.c, g = it.grps.length === c.secs.length && c.secs.length > 1 ? 'ทุกกลุ่ม' : 'กลุ่ม ' + it.grps.join(', ');
+      return '<li><button class="ritem" data-code="' + esc(c.code) + '" aria-label="ดูรายละเอียด ' + esc(c.code) + '"><span class="ccode num">' + esc(c.code) + '</span>' +
+        '<span class="cname">' + esc(c.name) + '<span class="rgrp">' + esc(c.prog.name) + ' · ' + esc(g) + '</span></span>' + pill(c.status) + '</button></li>';
+    }).join('') + '</ul></div>';
+  }
   function renderRecent(){
-    const r = VIEW.recent, box = $('recent');
-    box.hidden = !r.length; if (!r.length) return;
-    const show = r.slice(0, recentN);
-    const opts = [[3, 'ย่อเหลือ 3 รายการ'], [10, 'แสดง 10 รายการ'], [20, 'แสดง 20 รายการ'], [Infinity, 'แสดงทั้งหมด ' + r.length + ' รายการ']]
-      .filter(function(o){ return o[0] === Infinity ? r.length > 3 : o[0] < r.length; })
-      .filter(function(o){ return Math.min(o[0], r.length) !== Math.min(recentN, r.length); });
-    box.innerHTML = '<div class="rhead"><h2>รายวิชาที่ส่งเกรดล่าสุด</h2><span class="sub">เรียงตามวันที่ส่งในรายการรออนุมัติของระบบ REG ซึ่งไม่มีเวลา รายวิชาที่ส่งวันเดียวกันเรียงตามรหัสวิชา</span></div>' +
-      '<ol class="rlist">' + show.map(function(c, i){
-        const g = c.lastGrps.length === c.secs.length && c.secs.length > 1 ? 'ทุกกลุ่ม' : 'กลุ่ม ' + c.lastGrps.join(', ');
-        return '<li><button class="ritem" data-code="' + esc(c.code) + '" aria-label="ดูรายละเอียด ' + esc(c.code) + '"><span class="rank num">' + (i + 1) + '</span><span class="rdate num">' + esc(c.last.t) + '</span>' +
-          '<span class="ccode num">' + esc(c.code) + '</span><span class="cname">' + esc(c.name) + '<span class="rgrp">' + esc(c.prog.name) + ' · ' + esc(g) + '</span></span>' + pill(c.status) + '</button></li>';
-      }).join('') + '</ol>' +
-      (opts.length ? '<div class="rbtns">' + opts.map(function(o){ return '<button class="btn ghost small" data-n="' + o[0] + '">' + o[1] + '</button>'; }).join('') + '<span class="sub">แสดง ' + show.length + ' จาก ' + r.length + ' รายวิชา</span></div>' : '');
+    const box = $('recent'), tk = todayKey(), days = VIEW.days;
+    box.hidden = false;
+    const today = days.find(function(d){ return d.k === tk; });
+    const before = days.filter(function(d){ return d.k < tk; });
+    const n = today ? today.items.length : 0;
+    let h = '<div class="rhead"><h2 class="num">' + (n ? 'วันนี้ (' + fmtKey(tk) + ') มีผู้ส่งผลการเรียนจำนวน ' + n + ' วิชา' : 'วันนี้ (' + fmtKey(tk) + ') ยังไม่มีผู้ส่งผลการเรียน') + '</h2>' +
+      '<span class="sub">นับจากวันที่ส่งในรายการรออนุมัติของระบบ REG' + (DATA.asOf ? ' ข้อมูล ณ ' + esc(DATA.asOf) : '') + '</span></div>';
+    if (!rOpen){
+      box.innerHTML = h + (n || before.length ? '<div class="rbtns"><button class="btn ghost small" data-act="open" aria-expanded="false">กดดูเพิ่มเติม</button></div>' : '');
+      return;
+    }
+    if (today) h += dayBlock(today, 'วันนี้ ' + fmtKey(tk));
+    const shown = rAll ? before : before.slice(0, rDepth);
+    shown.forEach(function(d){ h += dayBlock(d, fmtKey(d.k)); });
+    if (!today && !shown.length) h += '<div class="sub">ยังไม่มีรายวิชาที่ส่งในวันนี้</div>';
+    const next = rAll ? null : before[rDepth];
+    h += '<div class="rbtns">' +
+      (next ? '<button class="btn ghost small" data-act="prev">' + fmtKey(next.k) + '</button>' : '') +
+      (!rAll && before.length > shown.length + (next ? 1 : 0) ? '<button class="btn ghost small" data-act="all">แสดงผลทั้งหมด</button>' : '') +
+      '<button class="btn ghost small" data-act="close" aria-expanded="true">ย่อ</button></div>';
+    box.innerHTML = h;
   }
   $('recent').addEventListener('click', function(e){
-    const nb = e.target.closest('button[data-n]');
-    if (nb){ recentN = nb.dataset.n === 'Infinity' ? Infinity : +nb.dataset.n; renderRecent(); return; }
+    const ab = e.target.closest('button[data-act]');
+    if (ab){
+      const a = ab.dataset.act;
+      if (a === 'open') rOpen = true; else if (a === 'prev') rDepth++; else if (a === 'all') rAll = true; else { rOpen = false; rDepth = 0; rAll = false; }
+      renderRecent(); return;
+    }
     const b = e.target.closest('.ritem'); if (!b) return;
     prog = 'all'; filt = 'all'; $('q').value = b.dataset.code; render();
     const d = document.querySelector('details.course'); if (d) d.open = true;
@@ -614,7 +650,6 @@ if (typeof module !== 'undefined') module.exports = Core;
 
   /* ---------- อัปเดตข้อมูลจากไฟล์ ---------- */
   function say(t){ $('msg').textContent = t; }
-  const p2 = function(n){ return String(n).padStart(2, '0'); };
   /* วันที่จากชื่อไฟล์ เช่น _10_11 หรือ _10_11_1105 (เวลา 11:05); ไม่มีเวลาในชื่อ ใช้เวลาที่ไฟล์ถูกบันทึกลงเครื่องถ้าเป็นวันเดียวกัน */
   function stampOf(f){
     const m = /(\d{1,2})[_\-.](\d{1,2})(?:[_\-.](\d{3,4}))?\D*\.xlsx$/i.exec(f.name), lm = f.lastModified ? new Date(f.lastModified) : null;
